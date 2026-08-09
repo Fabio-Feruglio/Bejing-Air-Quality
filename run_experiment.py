@@ -153,7 +153,7 @@ def run_experiment(args, seed, df, features, target_idx, device, multi_seed):
 
     print(f"\n--- Inizio Training: {args.epochs} Epoche ---")
     save_path = f'models/best_lstm_model_seed{seed}.pth'
-    best_loss = train_model(
+    best_loss, best_epoch, epochs_run, stopped_early = train_model(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
@@ -163,7 +163,8 @@ def run_experiment(args, seed, df, features, target_idx, device, multi_seed):
         save_path=save_path,
         baseline_val_mse=baseline_val,
     )
-    print(f"\nTraining completato. Miglior Val Loss: {best_loss:.4f} (baseline persistenza: {baseline_val:.4f})")
+    print(f"\nTraining completato. Miglior Val Loss: {best_loss:.4f} (epoca {best_epoch}/{epochs_run}, "
+          f"early stopping: {stopped_early}) (baseline persistenza: {baseline_val:.4f})")
 
     model.load_state_dict(torch.load(save_path, map_location=device))
 
