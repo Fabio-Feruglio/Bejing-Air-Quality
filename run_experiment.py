@@ -1,4 +1,6 @@
 import argparse
+import random
+
 import numpy as np
 import torch
 import wandb
@@ -12,6 +14,16 @@ from src.model import AirQualityLSTM
 from src.train import train_model
 from src.evaluate import persistence_baseline_mse, report_original_scale_metrics
 from src.evaluate import compute_mse, skill_ratio
+
+
+def set_seed(seed):
+    """Fissa il seed su tutte le sorgenti di randomicita' rilevanti, cosi'
+    ogni run e' riproducibile (data corruption, split shuffling, init pesi)."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def create_sequences(data, target_col_idx, seq_length=24):
@@ -82,22 +94,22 @@ def parse_args():
     parser.add_argument("--run_name", type=str, default="experiment_1")
     parser.add_argument("--generalization_stations", type=str, default="",
         help="Stazioni (separate da virgola) MAI usate in training, per testare la generalizzazione")
+    parser.add_argument("--seeds", type=str, default="42",
+        help="Seed (o seed multipli separati da virgola, es. '42,123,7') per ripetere l'esperimento "
+             "e valutare quanto lo skill ratio dipende dall'inizializzazione random.")
     return parser.parse_args()
 
 
-def main():
-    args = parse_args()
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"Dispositivo in uso: {device}")
+def run_experiment(args, seed, df, features, target_idx, device, multi_seed):
+    """Esegue un intero esperimento (data prep + training + valutazione) con
+    un seed fissato. Ritorna un dizionario con le metriche principali."""
+    set_seed(seed)
 
-    wandb.init(project=args.wandb_project, config=vars(args), name=args.run_name)
+    run_name = f"{args.run_name}_seed{seed}" if multi_seed else args.run_name
+    wandb.init(project=args.wandb_project, config={**vars(args), "seed": seed}, name=run_name, reinit=True)
 
-    print(f"Caricamento dati da {args.data_path} per la stazione {args.station}...")
-    df = pd.read_csv(args.data_path)
+    print(f"\nCaricamento dati da {args.data_path} per la stazione {args.station} (seed={seed})...")
     df_station = df[df['station'] == args.station].reset_index(drop=True)
-
-    features = ['PM2.5', 'PM10', 'SO2', 'NO2', 'CO', 'O3', 'TEMP', 'PRES', 'DEWP']
-    target_idx = features.index(args.target_col)
 
     n = len(df_station)
     val_start = int(n * (1 - args.val_size - args.test_size))
@@ -140,7 +152,7 @@ def main():
     )
 
     print(f"\n--- Inizio Training: {args.epochs} Epoche ---")
-    save_path = 'models/best_lstm_model.pth'
+    save_path = f'models/best_lstm_model_seed{seed}.pth'
     best_loss = train_model(
         model=model,
         train_loader=train_loader,
@@ -154,20 +166,25 @@ def main():
     print(f"\nTraining completato. Miglior Val Loss: {best_loss:.4f} (baseline persistenza: {baseline_val:.4f})")
 
     model.load_state_dict(torch.load(save_path, map_location=device))
+
+    # --- Metriche sul test set, incluso lo skill ratio esplicito ---
     baseline_test = persistence_baseline_mse(X_test, y_test, target_idx)
+    test_mse = compute_mse(model, test_loader, device)
+    test_skill_ratio = skill_ratio(test_mse, baseline_test)
     rmse, mae = report_original_scale_metrics(
         model, test_loader, scaler, target_idx, len(features), device, target_name=args.target_col
     )
     print(f"Baseline di persistenza (test, scala 0-1): {baseline_test:.4f}")
+    print(f"Test skill ratio: {test_skill_ratio:.4f}")
     wandb.log({
         "baseline_persistence_test_mse": baseline_test,
+        "test_mse": test_mse,
+        "test_skill_ratio": test_skill_ratio,
         "test_rmse_original_scale": rmse,
         "test_mae_original_scale": mae,
     })
 
-    # Generalizzazione su stazioni MAI viste in training -- va dentro main(),
-    # dopo l'inizializzazione di df/injector/sanitizer/scaler/model, e prima
-    # di wandb.finish() cosi' i log arrivano sulla stessa run.
+    # Generalizzazione su stazioni MAI viste in training.
     if args.generalization_stations:
         print("\n--- Generalizzazione su stazioni mai viste ---")
         for station in [s.strip() for s in args.generalization_stations.split(",")]:
@@ -182,6 +199,67 @@ def main():
             })
 
     wandb.finish()
+
+    return {
+        "seed": seed,
+        "best_val_loss": best_loss,
+        "baseline_test": baseline_test,
+        "test_mse": test_mse,
+        "test_skill_ratio": test_skill_ratio,
+        "test_rmse": rmse,
+        "test_mae": mae,
+    }
+
+
+def main():
+    args = parse_args()
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Dispositivo in uso: {device}")
+
+    df = pd.read_csv(args.data_path)
+    features = ['PM2.5', 'PM10', 'SO2', 'NO2', 'CO', 'O3', 'TEMP', 'PRES', 'DEWP']
+    target_idx = features.index(args.target_col)
+
+    seeds = [int(s.strip()) for s in args.seeds.split(",")]
+    multi_seed = len(seeds) > 1
+
+    all_results = []
+    for seed in seeds:
+        print(f"\n{'=' * 60}\nEsperimento con seed={seed}\n{'=' * 60}")
+        result = run_experiment(args, seed, df, features, target_idx, device, multi_seed)
+        all_results.append(result)
+
+    # --- Aggregazione su piu' seed: media +/- deviazione standard ---
+    if multi_seed:
+        skill_ratios = np.array([r["test_skill_ratio"] for r in all_results])
+        rmses = np.array([r["test_rmse"] for r in all_results])
+        maes = np.array([r["test_mae"] for r in all_results])
+
+        print(f"\n{'=' * 60}")
+        print(f"Risultati aggregati su {len(seeds)} seed: {seeds}")
+        print(f"{'=' * 60}")
+        print(f"Test skill ratio: {skill_ratios.mean():.4f} +/- {skill_ratios.std():.4f} "
+              f"(valori singoli: {[round(float(s), 3) for s in skill_ratios]})")
+        print(f"Test RMSE:        {rmses.mean():.4f} +/- {rmses.std():.4f}")
+        print(f"Test MAE:         {maes.mean():.4f} +/- {maes.std():.4f}")
+
+        summary_run = wandb.init(
+            project=args.wandb_project,
+            name=f"{args.run_name}_summary_{len(seeds)}seeds",
+            config={**vars(args), "seeds": seeds},
+            job_type="summary",
+            reinit=True,
+        )
+        summary_run.log({
+            "n_seeds": len(seeds),
+            "test_skill_ratio_mean": float(skill_ratios.mean()),
+            "test_skill_ratio_std": float(skill_ratios.std()),
+            "test_rmse_mean": float(rmses.mean()),
+            "test_rmse_std": float(rmses.std()),
+            "test_mae_mean": float(maes.mean()),
+            "test_mae_std": float(maes.std()),
+        })
+        summary_run.finish()
 
 
 if __name__ == "__main__":
