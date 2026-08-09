@@ -66,3 +66,18 @@ def report_original_scale_metrics(model, data_loader, scaler, target_idx, num_fe
     print(f"  MAE:  {mae:.2f}")
 
     return rmse, mae
+
+def compute_mse(model, data_loader, device):
+    """MSE del modello in scala 0-1 (stesse unita' della baseline), utile per
+    calcolare lo skill ratio senza dover invertire lo scaler."""
+    preds, targets = get_predictions(model, data_loader, device)
+    return torch.mean((preds - targets) ** 2).item()
+
+
+def skill_ratio(model_mse, baseline_mse):
+    """
+    < 1  -> il modello batte la baseline di persistenza (sta imparando qualcosa)
+    ~ 1  -> il modello non fa meglio del semplice "copia l'ultimo valore"
+    > 1  -> il modello e' peggio della baseline banale
+    """
+    return model_mse / baseline_mse if baseline_mse > 0 else float('nan')
