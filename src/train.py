@@ -1,11 +1,11 @@
-# src/train.py (AGGIORNATO)
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import os
-import wandb # <--- AGGIUNTO
+import wandb
 
-def add_gaussian_noise(tensor, mean=0.0, std=0.05):
+def add_gaussian_noise(tensor, mean=0.0, std=0.0):
     noise = torch.randn(tensor.size()) * std + mean
     return tensor + noise.to(tensor.device)
 
@@ -24,7 +24,7 @@ def train_model(model, train_loader, val_loader, epochs=50, lr=0.001, device='cp
         train_loss = 0.0
         for X_batch, y_batch in train_loader:
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-            X_batch_noisy = add_gaussian_noise(X_batch, std=0.02)
+            X_batch_noisy = add_gaussian_noise(X_batch, std=0.0)
 
             optimizer.zero_grad()
             predictions = model(X_batch_noisy)
