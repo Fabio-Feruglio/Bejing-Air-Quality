@@ -24,18 +24,14 @@ class DataSanitizer:
         for col in columns:
             mean, std = self.stats_[col]
 
-            # 1. Outlier hardware (glitch) -> NaN, con statistiche del training
+            # Outlier hardware (glitch) -> NaN, con statistiche del training
             if std and not pd.isna(std):
                 z_scores = (df_clean[col] - mean).abs() / std
                 df_clean.loc[z_scores > self.z_threshold, col] = np.nan
 
-            # 2. Imputazione dei buchi (disconnessioni)
+            # Imputazione dei buchi (disconnessioni)
             df_clean[col] = df_clean[col].interpolate(limit_direction='both').bfill().ffill()
 
-            # 3. Smoothing CAUSALE (EWMA): guarda solo indietro nel tempo.
-            #    Sostituisce il vecchio filtro Savitzky-Golay, che essendo
-            #    centrato "leggeva" dati futuri dentro la finestra e rendeva
-            #    la serie artificialmente piu' prevedibile del reale.
             df_clean[col] = df_clean[col].ewm(span=self.smooth_span, adjust=False).mean()
 
         return df_clean
