@@ -44,7 +44,7 @@ class SensorErrorInjector:
         return df_noisy
 
     def corrupt_dataset(self, df, columns):
-        """Applica tutti gli errori hardware alle colonne specificate.
+        """
 
         Nota: l'indice viene resettato prima di iniettare rumore. Le tre
         funzioni sopra generano posizioni casuali con np.random.randint,
