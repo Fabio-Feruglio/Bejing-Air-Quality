@@ -120,7 +120,7 @@ def run_experiment(args, seed, df, features, target_idx, device, multi_seed):
     df_test_raw = df_station.iloc[test_start:].reset_index(drop=True)
     print(f"Righe -> train: {len(df_train_raw)} | val: {len(df_val_raw)} | test: {len(df_test_raw)}")
 
-    injector = SensorErrorInjector()
+    injector = SensorErrorInjector(random_seed = seed)
     sanitizer = DataSanitizer()
     scaler = MinMaxScaler()
 

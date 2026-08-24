@@ -29,8 +29,12 @@ class DataSanitizer:
                 z_scores = (df_clean[col] - mean).abs() / std
                 df_clean.loc[z_scores > self.z_threshold, col] = np.nan
 
-            # Imputazione dei buchi (disconnessioni)
-            df_clean[col] = df_clean[col].interpolate(limit_direction='both').bfill().ffill()
+            # Imputazione CAUSALE dei buchi: solo forward-fill, mai guarda al
+            # futuro. Le righe che restano NaN (nessun valore precedente
+            # disponibile, tipicamente solo l'inizio della serie) vengono
+            # scartate a valle da dropna() in process_split, invece di essere
+            # "indovinate" con dati non ancora osservati.
+            df_clean[col] = df_clean[col].ffill()
 
             df_clean[col] = df_clean[col].ewm(span=self.smooth_span, adjust=False).mean()
 
