@@ -2,10 +2,8 @@ import torch
 import torch.nn as nn
 
 class AirQualityLSTM(nn.Module):
-    """
-    Rete LSTM progettata per serie temporali. Include un Dropout aggressivo 
-    per forzare il modello a generalizzare e non memorizzare il rumore.
-    """
+    
+    
     def __init__(self, input_size, hidden_size, num_layers=2, output_size=1, dropout_prob=0.4):
         super(AirQualityLSTM, self).__init__()
         
