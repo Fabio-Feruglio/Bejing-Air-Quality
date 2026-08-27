@@ -26,9 +26,9 @@ class AirQualityLSTM(nn.Module):
         self.fc = nn.Linear(hidden_size, output_size)
         
     def forward(self, x):
-        # x.shape: (batch_size, sequence_length, input_size)
         
-        # Passaggio attraverso la LSTM
+        
+        
         lstm_out, (hn, cn) = self.lstm(x)
         
         # Estraiamo solo l'output dell'ultimo step temporale della sequenza
